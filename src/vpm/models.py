@@ -1,18 +1,7 @@
-from typing import Any, Callable, Sequence, Union
+from typing import Any, Callable, Sequence
 
-import flax
 import flax.linen as nn
-import jax
-import matplotlib as mpl
-import matplotlib.pyplot as plt
-import numba as nb
-import numpy as np
-import optax
-from flax import core, struct, traverse_util
-from flax.core import freeze, unfreeze
-from flax.training.train_state import TrainState
 from jax import numpy as jnp
-from jax import random
 
 
 class CommittorNet(nn.Module):

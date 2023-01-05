@@ -1,24 +1,16 @@
 import copy
-import os
-import sys
-import dill as pickle
-from typing import Any, Callable, Sequence, Union
+from typing import Any, Callable, Sequence
 
 import flax
 import flax.linen as nn
 import jax
-import matplotlib as mpl
-import matplotlib.pyplot as plt
-import numba as nb
 import numpy as np
 import optax
-from flax import core, struct, traverse_util
-from flax.core import freeze, unfreeze
+from flax import traverse_util
+from flax.core import freeze
 from flax.training.train_state import TrainState
 from jax import numpy as jnp
 from jax import random
-
-import extq
 
 
 @jax.jit
@@ -28,9 +20,9 @@ def loss_jacobi(params, state, params_prev, batch, alpha, lamb=1):
     q_xt_prev = state.apply_fn(params_prev, xt)
     q_xtp_prev = state.apply_fn(params_prev, xtp)
     q_xt_curr = state.apply_fn(params, xt)
-    q_xtp_curr = state.apply_fn(params, xtp)
+    # q_xtp_curr = state.apply_fn(params, xtp)
 
-    term1 = 0.5 * jnp.mean(q_xt_curr ** 2)
+    term1 = 0.5 * jnp.mean(q_xt_curr**2)
     term2 = jnp.mean(q_xt_curr * q_xt_prev)
     term3 = jnp.mean(q_xtp_prev * q_xt_curr)
     return term1 - (1 - alpha) * term2 - alpha * term3
@@ -43,7 +35,7 @@ def loss_sigmoid(params, state, params_prev, batch, alpha, lamb=1):
     q_xt_prev = nn.sigmoid(state.apply_fn(params_prev, xt))
     q_xtp_prev = nn.sigmoid(state.apply_fn(params_prev, xtp))
     q_xt_curr = state.apply_fn(params, xt)
-    q_xtp_curr = state.apply_fn(params, xtp)
+    # q_xtp_curr = state.apply_fn(params, xtp)
 
     term1 = nn.softplus(q_xt_curr)
     term2 = q_xt_curr * q_xt_prev
@@ -57,7 +49,7 @@ def loss_pi(params, state, params_prev, batch, alpha, lamb=1):
     xtp = batch[1, ...]
     u_xt_prev = state.apply_fn(params_prev, xt)
     pi_xt_prev = jnp.exp(u_xt_prev - 1)
-    pi_xtp_prev = jnp.exp(state.apply_fn(params_prev, xtp) - 1)
+    # pi_xtp_prev = jnp.exp(state.apply_fn(params_prev, xtp) - 1)
     u_xt_curr = state.apply_fn(params, xt)
     u_xtp_curr = state.apply_fn(params, xtp)
 
@@ -67,7 +59,7 @@ def loss_pi(params, state, params_prev, batch, alpha, lamb=1):
     term3 = pi_xt_prev * u_xtp_curr
     inner = jnp.exp(u_xt_curr - (1 - alpha) * u_xt_prev)
     v = params["v"]
-    norm = lamb * (2 * v * (jnp.mean(inner) - 1) - v ** 2)
+    norm = lamb * (2 * v * (jnp.mean(inner) - 1) - v**2)
     return jnp.mean(term1 - (1 - alpha) * term2 - alpha * term3) + norm
 
 
@@ -211,13 +203,12 @@ def normalize(state, data, n_iter=100):
     vector (g0 - b) has norm 1
     """
     xt = data[0, ...]
-    xtp = data[1, ...]
 
     @jax.jit
     def loss_fn(params):
         q_xt_curr = state.apply_fn({"params": params["params"]}, xt)
         v = params["v"]
-        norm = 2 * v * (jnp.mean(q_xt_curr ** 2) - 1) - v ** 2
+        norm = 2 * v * (jnp.mean(q_xt_curr**2) - 1) - v**2
         return jnp.squeeze(norm)
 
     @jax.jit
@@ -235,7 +226,7 @@ def normalize(state, data, n_iter=100):
     for i in range(n_iter):
         state = update(state)
         q_xt_curr = state.apply_fn({"params": state.params["params"]}, xt)
-        print(np.mean(q_xt_curr ** 2))
+        print(np.mean(q_xt_curr**2))
 
     return state
 
@@ -309,7 +300,7 @@ def krylov_train_step(
         new_state : updated training state
     """
     xt = batch[0, ...]
-    xtp = batch[1, ...]
+    # xtp = batch[1, ...]
     u_xt_prev = u_prev[0, ...]
     u_xtp_prev = u_prev[1, ...]
     # John calls this "OP" in his code
@@ -318,13 +309,13 @@ def krylov_train_step(
     @jax.jit
     def loss_fn(params):
         u_xt_curr = state.apply_fn({"params": params["params"]}, xt)
-        u_xtp_curr = state.apply_fn({"params": params["params"]}, xtp)
+        # u_xtp_curr = state.apply_fn({"params": params["params"]}, xtp)
         v = params["v"]
 
-        term1 = 0.5 * jnp.mean(u_xt_curr ** 2)
+        term1 = 0.5 * jnp.mean(u_xt_curr**2)
         term2 = jnp.mean(u_xt_curr * u_xt_prev)
         term3 = jnp.mean(resid * u_xt_curr)
-        norm = jnp.mean(2 * v * (jnp.mean(u_xt_curr ** 2) - 1) - v ** 2)
+        norm = jnp.mean(2 * v * (jnp.mean(u_xt_curr**2) - 1) - v**2)
         return term1 - (1 - alpha) * term2 - alpha * term3 + lamb * norm
 
     # compute gradient of loss w.r.t current parameters (theta) and v

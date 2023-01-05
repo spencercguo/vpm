@@ -1,22 +1,8 @@
-import copy
-import os
-import sys
-import dill as pickle
-from typing import Any, Callable, Sequence, Union
+from typing import Any, Sequence
 
-import flax
-import flax.linen as nn
-import jax
-import matplotlib as mpl
 import matplotlib.pyplot as plt
-import numba as nb
 import numpy as np
-import optax
-from flax import core, struct, traverse_util
-from flax.core import freeze, unfreeze
-from flax.training.train_state import TrainState
 from jax import numpy as jnp
-from jax import random
 
 import extq
 
@@ -56,10 +42,6 @@ def _fdm_gen(potential, kT, A_fn, B_fn, res):
     y = np.linspace(-1.5, 2.5, res)
     X, Y = np.meshgrid(x, y)
     DGrid = np.asarray(np.concatenate([X[:, :, None], Y[:, :, None]], axis=-1))
-    DGrid_Reshape = np.copy(DGrid).reshape((res ** 2, 2))
-    InA_Reshape = A_fn(DGrid_Reshape)
-    InB_Reshape = B_fn(DGrid_Reshape)
-    InD_Reshape = ~(InA_Reshape | InB_Reshape)
     InA = A_fn(DGrid)
     InB = B_fn(DGrid)
     InD = ~(InA | InB)
@@ -102,29 +84,3 @@ def rmse_log(ref, pred):
     log_ref = jnp.log(1 / (ref * (1 - ref)))
     log_pred = jnp.log(1 / (pred * (1 - pred)))
     return jnp.sqrt(jnp.mean((log_ref[inD] - log_pred[inD]) ** 2))
-
-
-def plot_muller_brown(state, ax=None, num_grid=50):
-    if ax is None:
-        ax = plt.gca()
-
-    test_input = make_grid(num_grid, -1.5, 1.0, -0.5, 2.0)
-    qp = np.reshape(state.apply_fn(state.params, test_input), (num_grid, num_grid))
-
-    pc = ax.pcolormesh(x, y, qp, cmap="RdYlBu_r")
-    return ax, pc
-
-
-def plot_threehole(state, transform_fn=lambda x: x, ax=None, num_grid=50):
-    if ax is None:
-        ax = plt.gca()
-
-    test_input = make_grid(num_grid, -2.0, 2.0, -1.5, 2.5)
-    qp = np.reshape(
-        transform_fn(state.apply_fn(state.params, test_input)), (num_grid, num_grid)
-    )
-
-    x = np.linspace(-2.0, 2.0, num_grid)
-    y = np.linspace(-1.5, 2.5, num_grid)
-    pc = ax.pcolormesh(x, y, qp, cmap="RdYlBu_r")
-    return ax, pc
