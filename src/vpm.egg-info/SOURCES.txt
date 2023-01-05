@@ -1,0 +1,14 @@
+LICENSE
+README.md
+pyproject.toml
+setup.py
+src/vpm/__init__.py
+src/vpm/models.py
+src/vpm/train.py
+src/vpm/utils.py
+src/vpm.egg-info/PKG-INFO
+src/vpm.egg-info/SOURCES.txt
+src/vpm.egg-info/dependency_links.txt
+src/vpm.egg-info/not-zip-safe
+src/vpm.egg-info/requires.txt
+src/vpm.egg-info/top_level.txt
