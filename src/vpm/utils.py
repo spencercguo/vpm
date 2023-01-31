@@ -1,10 +1,32 @@
 from typing import Any, Sequence
 
-import matplotlib.pyplot as plt
 import numpy as np
 from jax import numpy as jnp
 
 import extq
+
+
+def split_indices(arrays):
+    """Gets the indices for np.split from a
+    list of arrays.
+
+    Parameters
+    ----------
+    arrays : ndarray or list/tuple of ndarray
+    Arrays from which to get indices
+
+    Returns
+    -------
+    traj_inds : list of int
+    Frame separators to use in np.split
+    """
+    traj_lens = [len(traj) for traj in arrays]
+    traj_inds = []
+    subtot = 0
+    for length in traj_lens[:-1]:
+        subtot += length
+        traj_inds.append(subtot)
+    return traj_inds
 
 
 def build_dga_krylov(model, params: Sequence[Any], data, guess, coeffs):
@@ -83,4 +105,11 @@ def rmse_log(ref, pred):
     inD = ~((ref == 0) | (ref == 1))
     log_ref = jnp.log(1 / (ref * (1 - ref)))
     log_pred = jnp.log(1 / (pred * (1 - pred)))
+    return jnp.sqrt(jnp.mean((log_ref[inD] - log_pred[inD]) ** 2))
+
+
+def rmse_logit(ref, pred, eps=np.exp(-20)):
+    inD = ~((ref == 0) | (ref == 1))
+    log_ref = jnp.log((ref + eps) / (1 - ref + eps))
+    log_pred = jnp.log((pred + eps) / (1 - pred + eps))
     return jnp.sqrt(jnp.mean((log_ref[inD] - log_pred[inD]) ** 2))
