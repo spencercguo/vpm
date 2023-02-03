@@ -1,6 +1,7 @@
 from typing import Any, Sequence
 
 import numpy as np
+import scipy
 from jax import numpy as jnp
 
 import extq
@@ -47,6 +48,44 @@ def build_dga_krylov(model, params: Sequence[Any], data, guess, coeffs):
     X = np.concatenate(basis, axis=-1)
     u = X @ coeffs + guess
     return u
+
+
+def solve_vac(X):
+    """Solve the VAC problem :math:`C(t)W = C(0)W\Lambda`
+    where C(t) and C(0) are correlation matrices.
+
+    Arguments
+    ---------
+        X: array of shape (2, n, n_basis) with the first index representing
+            either the time 0 or time-lagged points
+
+    Returns
+    -------
+        evals: eigenvalues, sorted by decreasing magnitude
+        coeffs: the coefficients of eigenvectors in eigenbasis
+    """
+    X = np.array(X, dtype=float, copy=True)
+    C0 = X[0].T @ X[0]
+    Ct = X[0].T @ X[1]
+    evals, coeffs = scipy.linalg.eig(Ct, b=C0)
+    inds = np.argsort(np.abs(evals))[::-1]
+    return evals[inds], coeffs[:, inds]
+
+
+def projection_distance(u, v):
+    """Computes the projection distance between subspaces
+    spanned by u and v. u and v are assumed to be orthonormal
+
+    Arguments
+    ---------
+        u : array of shape (n, n_basis)
+        v : array of shape (n, b_basis)
+    """
+    assert len(u) == len(v)
+    cov = (u.T @ v)
+    s = scipy.linalg.svdvals(cov)
+    s = np.clip(s, 0.0, 1.0)
+    return np.sqrt(len(cov) - np.sum(s ** 2))
 
 
 def make_grid(num_grid, xmin, xmax, ymin, ymax):

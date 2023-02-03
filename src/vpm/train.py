@@ -5,9 +5,10 @@ import flax
 import flax.linen as nn
 import jax
 import numpy as np
+import scipy
 import optax
 from flax import traverse_util
-from flax.core import freeze
+from flax.core import freeze, unfreeze
 from flax.training.train_state import TrainState
 from jax import numpy as jnp
 from jax import random
@@ -408,3 +409,135 @@ def krylov_power_iteration(
 
     epoch_loss = np.min(epoch_loss)
     return epoch_loss, state, u_new, coeffs, basis
+
+
+@jax.jit
+def subspace_train_step(
+        state: TrainState,
+    batch,
+    batch_prev,
+    alpha: float,
+    gamma: float = 0.0
+):
+    """Performs a single optimization step for subspace iteration.
+
+    Arguments
+    ---------
+        state : train state
+        batch : (xt, xtp) pairs of data points sampled from p and the transition kernel
+        batch_prev : basis at the previous power iteration step evaluated at (xt, xtp). shape (2, n_batch, n_basis)
+        alpha : damping factor
+        gamma : penalty on V/A matrix
+
+    Returns
+    -------
+        new_state : updated training state
+    """
+    batch_size = batch.shape[1]
+    xt = batch[0, ...]
+    xtp = batch[1, ...]
+    phi_xt_prev = batch_prev[0, ...]  # shape: n_batch x n_basis - 1
+    phi_xtp_prev = batch_prev[1, ...]
+
+    @jax.jit
+    def loss_fn(params):
+        phi_xt = state.apply_fn(
+            {"params": params["params"]}, xt
+        )  # shape: n_batch x n_basis - 1
+        # add constant function to NN output
+        Phi = jnp.concatenate(
+            (jnp.ones(shape=(batch_size, 1)), phi_xt), axis=-1
+        )  # shape: n_batch x n_basis
+
+        A = params["A"]
+        phi_A = Phi @ A
+        term1 = 0.5 * jnp.mean(phi_A**2)
+        term2 = jnp.mean(phi_A * phi_xt_prev)
+        term3 = jnp.mean(phi_A * phi_xtp_prev)
+        # sum of off diagonal elements squared
+        term4 = jnp.sum(jnp.where(~jnp.eye(len(A), dtype=bool), A**2, 0.0))
+        return term1 - (1 - alpha) * term2 - alpha * term3 + gamma * term4
+
+    # compute gradient of loss w.r.t current parameters (theta) and A
+    grad_fn = jax.value_and_grad(loss_fn)
+    loss, grads = grad_fn(state.params)
+
+    new_state = state.apply_gradients(grads=grads)
+    return new_state, loss
+
+
+def subspace_iteration(
+    epoch: int,
+    state: TrainState,
+    dataset,
+    basis_prev,
+    batch_size,
+    rng,
+    inner_iter: int = 100,
+    print_loss_every: int = 10,
+    nalpha: int = None,
+    gamma: float = 0.0
+):
+    """Performs a single step of subspace iteration for the eigenproblem.
+
+    Arguments
+    ---------
+        epoch : iteration number
+        state : train state containing parameters, model apply function, and optimizers
+        dataset : dataset of (xt, xtp) pairs. The first axis must be 0 or 1 corresponding to the time lag, the second axis must be the number of data points, and the last axis is the number of features for each datapoint
+        basis_prev : basis set (including constant function) from previous power iteration step. shape (2, n, n_basis)
+        batch_size : batch size
+        rng : random seed
+        inner_iter : optional, number of inner minimization steps to perform
+        print_loss_every : optional, how often to print loss during inner minimization
+        nalpha : optional, after how many power iterations to turn on damping (and then sqrt{t + 1})
+
+    Returns
+    -------
+        epoch_loss : minimum loss during inner iterations
+        state : updated TrainState
+        basis : new basis (orthonormalized)
+        R : orthogonalizing matrix
+    """
+    epoch_loss = []
+    if nalpha is None:
+        nalpha = 0
+    else:
+        if epoch < nalpha:
+            alpha = 1.0
+        else:
+            alpha = 1 / jnp.sqrt(epoch + 1 - nalpha)
+    size = dataset.shape[1]
+    k = basis_prev.shape[-1]
+
+    for i in range(inner_iter):
+        # draw batch
+        rng, key = random.split(rng)
+        batch_idx = random.choice(key, size, shape=(batch_size,))
+        batch = dataset[:, batch_idx, :]
+        batch_prev = basis_prev[:, batch_idx, :]
+        # perform a training step
+        state, loss = subspace_train_step(state, batch, batch_prev, alpha, gamma=gamma)
+        # print loss
+        epoch_loss.append(loss)
+        if i % print_loss_every == 0:
+            print(f"Loss: {loss:>7e} [{i:>5d} / {inner_iter:>5}]")
+
+    # add new basis function
+    basis_new = state.apply_fn({"params": state.params["params"]}, dataset)
+    # include constant function for orthogonalization
+    basis_new = jnp.concatenate((jnp.ones(shape=(2, size, 1)), basis_new), axis=-1)
+    # convert to double precision
+    basis_new = np.array(basis_new, dtype=float, copy=True)
+    X = basis_new[0, ...]
+    #  orthogonalize using QR
+    Q, R = np.linalg.qr(X)
+    basis_new = basis_new @ np.linalg.inv(R)
+    # Rescale "V"/A matrix by R
+    unfrozen_params = unfreeze(state.params)
+    A = np.array(unfrozen_params["A"], dtype=float, copy=True)
+    unfrozen_params["A"] = A @ np.linalg.inv(R)
+    state.replace(params=freeze(unfrozen_params))
+
+    epoch_loss = np.min(epoch_loss)
+    return epoch_loss, state, basis_new, R

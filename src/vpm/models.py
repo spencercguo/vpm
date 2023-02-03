@@ -79,3 +79,24 @@ class MLP(nn.Module):
         x = self.act(x)
         x = nn.Dense(features=self.output_dim)(x)
         return x
+
+
+class ScaledMLP(nn.Module):
+    """Simple MLP with fully-connected layers and nonlinear
+    activations in between, but with nonlinearity at end to enforce
+    scale."""
+
+    output_dim: int
+    layer_widths: Sequence[int]
+    act: Callable
+    scale: int = 50
+
+    @nn.compact
+    def __call__(self, x):
+        for w in self.layer_widths:
+            x = nn.Dense(features=w)(x)
+        x = self.act(x)
+        x = nn.Dense(features=self.output_dim)(x)
+        x = self.scale * nn.tanh(x)
+        return x
+
