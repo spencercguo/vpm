@@ -1,5 +1,5 @@
 import copy
-from typing import Any, Callable, Sequence
+from typing import Any, Callable, Sequence, Tuple
 
 import flax
 import flax.linen as nn
@@ -362,13 +362,15 @@ def krylov_power_iteration(
         rng : random seed
         inner_iter : optional, number of inner minimization steps to perform
         print_loss_every : optional, how often to print loss during inner minimization
-        nalpha : optional, after how many power iterations to turn on damping (and then sqrt{t + 1})
+        nalpha : optional, after how many power iterations to turn on damping (and
+            then sqrt{t + 1})
 
     Returns
     -------
         epoch_loss : minimum loss during power iteration step
         state : new TrainState
-        u_new : updated values for the forecast on the dataset for the next power iteration step
+        u_new : updated values for the forecast on the dataset for the next power
+            iteration step
         coeffs : coefficients for basis functions to get u_new
         basis : updated basis set
     """
@@ -411,23 +413,61 @@ def krylov_power_iteration(
     return epoch_loss, state, u_new, coeffs, basis
 
 
+def subspace_initialize(
+    rng, model, lr, input_dim, output_dim, **kwargs
+) -> train_state.TrainState:
+    """Initialize a given model for subspace iteration and returns a TrainState
+
+    Arguments
+    ---------
+        rng : random number seed
+        model : a nn.Module
+        lr : learning rate
+        input_dim : dimension of input
+        output_dim : dimension of output basis. Note that the first function is constant
+            and is not learned by the network
+
+    Returns
+    -------
+        state : initialized state
+    """
+    rng, key1, key2 = random.split(rng, num=3)
+    params = model.init(key1, jnp.ones(shape=(1, input_dim)))
+
+    # initialize matrix A and v for normalization
+    flat_params = traverse_util.flatten_dict(params, sep="/")
+    unfrozen_params = unfreeze(params)
+    unfrozen_params["A"] = jnp.eye(output_dim)
+    unfrozen_params["v"] = jnp.zeros(shape=(output_dim, 1))
+    params = freeze(unfrozen_params)
+
+    tx = optax.adam(learning_rate=lr)
+    state = flax.training.train_state.TrainState.create(
+        apply_fn=model.apply, params=params, tx=tx
+    )
+    return state
+
+
 @jax.jit
 def subspace_train_step(
-        state: TrainState,
-    batch,
-    batch_prev,
+    state: TrainState,
+    batch: jnp.ndarray,
+    batch_prev: jnp.ndarray,
     alpha: float,
-    gamma: float = 0.0
-):
+    gamma: float = 1.0,
+    lamb: float = 1.0,
+) -> Tuple[train_state.TrainState, float]:
     """Performs a single optimization step for subspace iteration.
 
     Arguments
     ---------
         state : train state
         batch : (xt, xtp) pairs of data points sampled from p and the transition kernel
-        batch_prev : basis at the previous power iteration step evaluated at (xt, xtp). shape (2, n_batch, n_basis)
+        batch_prev : basis at the previous power iteration step evaluated at (xt, xtp).
+            shape (2, n_batch, n_basis)
         alpha : damping factor
-        gamma : penalty on V/A matrix
+        gamma : penalty on non-diagonal terms of V/A matrix
+        lamb : penalty on normalization
 
     Returns
     -------
@@ -450,42 +490,56 @@ def subspace_train_step(
         )  # shape: n_batch x n_basis
 
         A = params["A"]
+        v = params["v"]
         phi_A = Phi @ A
         term1 = 0.5 * jnp.mean(phi_A**2)
         term2 = jnp.mean(phi_A * phi_xt_prev)
         term3 = jnp.mean(phi_A * phi_xtp_prev)
         # sum of off diagonal elements squared
         term4 = jnp.sum(jnp.where(~jnp.eye(len(A), dtype=bool), A**2, 0.0))
-        return term1 - (1 - alpha) * term2 - alpha * term3 + gamma * term4
+        # normalization term
+        norm = jnp.sum(2 * v * (jnp.mean(Phi**2, axis=0) - 1) - v**2)
+        return term1 - (1 - alpha) * term2 - alpha * term3 + gamma * term4 + lamb * norm
 
     # compute gradient of loss w.r.t current parameters (theta) and A
     grad_fn = jax.value_and_grad(loss_fn)
     loss, grads = grad_fn(state.params)
+    flat_grads = traverse_util.flatten_dict(grads, sep="/")
+    # enforce A to be upper triangular
+    flat_grads["A"] = jnp.triu(flat_grads["A"])
+    # gradient ascent on normalization term
+    flat_grads["v"] = -flat_grads["v"]
+    unflat_grads = traverse_util.unflatten_dict(flat_grads, sep="/")
+    unflat_grads = freeze(unflat_grads)
 
-    new_state = state.apply_gradients(grads=grads)
+    new_state = state.apply_gradients(grads=unflat_grads)
     return new_state, loss
 
 
 def subspace_iteration(
     epoch: int,
     state: TrainState,
-    dataset,
-    basis_prev,
-    batch_size,
+    dataset: jnp.ndarray,
+    basis_prev: jnp.ndarray,
+    batch_size: int,
     rng,
     inner_iter: int = 100,
     print_loss_every: int = 10,
     nalpha: int = None,
-    gamma: float = 0.0
-):
+    gamma: float = 1.0,
+    lamb: float = 1.0,
+) -> Tuple[float, train_state.TrainState, jnp.ndarray, jnp.ndarray]:
     """Performs a single step of subspace iteration for the eigenproblem.
 
     Arguments
     ---------
         epoch : iteration number
         state : train state containing parameters, model apply function, and optimizers
-        dataset : dataset of (xt, xtp) pairs. The first axis must be 0 or 1 corresponding to the time lag, the second axis must be the number of data points, and the last axis is the number of features for each datapoint
-        basis_prev : basis set (including constant function) from previous power iteration step. shape (2, n, n_basis)
+        dataset : dataset of (xt, xtp) pairs. The first axis must be 0 or 1 corresponding
+            to the time lag, the second axis must be the number of data points, and the
+            last axis is the number of features for each datapoint
+        basis_prev : basis set (including constant function) from previous power iteration step.
+            shape (2, n, n_basis)
         batch_size : batch size
         rng : random seed
         inner_iter : optional, number of inner minimization steps to perform
@@ -496,8 +550,8 @@ def subspace_iteration(
     -------
         epoch_loss : minimum loss during inner iterations
         state : updated TrainState
-        basis : new basis (orthonormalized)
-        R : orthogonalizing matrix
+        Phi_tilde : new basis (orthonormalized). shape (2, n, n_basis)
+        R : orthogonalizing matrix of shape (n_basis, n_basis)
     """
     epoch_loss = []
     if nalpha is None:
@@ -517,27 +571,25 @@ def subspace_iteration(
         batch = dataset[:, batch_idx, :]
         batch_prev = basis_prev[:, batch_idx, :]
         # perform a training step
-        state, loss = subspace_train_step(state, batch, batch_prev, alpha, gamma=gamma)
+        state, loss = subspace_train_step(
+            state, batch, batch_prev, alpha, gamma=gamma, lamb=lamb
+        )
         # print loss
         epoch_loss.append(loss)
         if i % print_loss_every == 0:
             print(f"Loss: {loss:>7e} [{i:>5d} / {inner_iter:>5}]")
 
     # add new basis function
-    basis_new = state.apply_fn({"params": state.params["params"]}, dataset)
+    Phi = state.apply_fn({"params": state.params["params"]}, dataset)
     # include constant function for orthogonalization
-    basis_new = jnp.concatenate((jnp.ones(shape=(2, size, 1)), basis_new), axis=-1)
+    Phi = jnp.concatenate((jnp.ones(shape=(2, size, 1)), Phi), axis=-1)
     # convert to double precision
-    basis_new = np.array(basis_new, dtype=float, copy=True)
-    X = basis_new[0, ...]
-    #  orthogonalize using QR
-    Q, R = np.linalg.qr(X)
-    basis_new = basis_new @ np.linalg.inv(R)
-    # Rescale "V"/A matrix by R
-    unfrozen_params = unfreeze(state.params)
-    A = np.array(unfrozen_params["A"], dtype=float, copy=True)
-    unfrozen_params["A"] = A @ np.linalg.inv(R)
-    state.replace(params=freeze(unfrozen_params))
-
+    Phi = np.array(Phi, dtype=float, copy=True)
+    Phi0 = Phi[0, ...]
+    #  orthogonalize using QR, but no normalization
+    D = np.linalg.norm(Phi0, axis=0)
+    Q, R = np.linalg.qr(Phi0)
+    Phi_tilde = Phi @ (np.linalg.inv(R) @ np.diag(D))
     epoch_loss = np.min(epoch_loss)
-    return epoch_loss, state, basis_new, R
+
+    return epoch_loss, state, Phi_tilde, R
