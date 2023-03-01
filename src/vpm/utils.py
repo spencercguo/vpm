@@ -82,10 +82,10 @@ def projection_distance(u, v):
         v : array of shape (n, b_basis)
     """
     assert len(u) == len(v)
-    cov = (u.T @ v)
+    cov = u.T @ v
     s = scipy.linalg.svdvals(cov)
     s = np.clip(s, 0.0, 1.0)
-    return np.sqrt(len(cov) - np.sum(s ** 2))
+    return np.sqrt(len(cov) - np.sum(s**2))
 
 
 def make_grid(num_grid, xmin, xmax, ymin, ymax):

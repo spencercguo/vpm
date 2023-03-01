@@ -105,9 +105,7 @@ def initialize(rng, model, lr, **kwargs):
     params = model.init(key1, jnp.ones(shape=(1, 2)))
 
     tx = optax.adam(learning_rate=lr)
-    state = flax.training.train_state.TrainState.create(
-        apply_fn=model.apply, params=params, tx=tx
-    )
+    state = TrainState.create(apply_fn=model.apply, params=params, tx=tx)
     return state
 
 
@@ -413,9 +411,7 @@ def krylov_power_iteration(
     return epoch_loss, state, u_new, coeffs, basis
 
 
-def subspace_initialize(
-    rng, model, lr, input_dim, output_dim, **kwargs
-) -> train_state.TrainState:
+def subspace_initialize(rng, model, lr, input_dim, output_dim, **kwargs) -> TrainState:
     """Initialize a given model for subspace iteration and returns a TrainState
 
     Arguments
@@ -442,9 +438,7 @@ def subspace_initialize(
     params = freeze(unfrozen_params)
 
     tx = optax.adam(learning_rate=lr)
-    state = flax.training.train_state.TrainState.create(
-        apply_fn=model.apply, params=params, tx=tx
-    )
+    state = TrainState.create(apply_fn=model.apply, params=params, tx=tx)
     return state
 
 
@@ -456,7 +450,7 @@ def subspace_train_step(
     alpha: float,
     gamma: float = 1.0,
     lamb: float = 1.0,
-) -> Tuple[train_state.TrainState, float]:
+) -> Tuple[TrainState, float]:
     """Performs a single optimization step for subspace iteration.
 
     Arguments
@@ -528,7 +522,7 @@ def subspace_iteration(
     nalpha: int = None,
     gamma: float = 1.0,
     lamb: float = 1.0,
-) -> Tuple[float, train_state.TrainState, jnp.ndarray, jnp.ndarray]:
+) -> Tuple[float, TrainState, jnp.ndarray, jnp.ndarray]:
     """Performs a single step of subspace iteration for the eigenproblem.
 
     Arguments

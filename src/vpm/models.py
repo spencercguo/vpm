@@ -99,4 +99,3 @@ class ScaledMLP(nn.Module):
         x = nn.Dense(features=self.output_dim)(x)
         x = self.scale * nn.tanh(x)
         return x
-
