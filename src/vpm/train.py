@@ -48,20 +48,17 @@ def loss_sigmoid(params, state, params_prev, batch, alpha, lamb=1):
 def loss_pi(params, state, params_prev, batch, alpha, lamb=1):
     xt = batch[0, ...]
     xtp = batch[1, ...]
-    u_xt_prev = state.apply_fn(params_prev, xt)
-    pi_xt_prev = jnp.exp(u_xt_prev - 1)
-    # pi_xtp_prev = jnp.exp(state.apply_fn(params_prev, xtp) - 1)
-    u_xt_curr = state.apply_fn(params, xt)
-    u_xtp_curr = state.apply_fn(params, xtp)
+    z_xt_prev = state.apply_fn(params_prev, xt)
+    z_xt_curr = state.apply_fn(params, xt)
+    z_xtp_curr = state.apply_fn(params, xtp)
 
     # TODO: check loss terms
-    term1 = jnp.exp(u_xt_curr - 1)
-    term2 = u_xt_curr * u_xt_prev
-    term3 = pi_xt_prev * u_xtp_curr
-    inner = jnp.exp(u_xt_curr - (1 - alpha) * u_xt_prev)
+    term1 = jnp.exp(z_xt_curr)
+    term2 = z_xt_curr * jnp.exp(z_xt_prev - 1)
+    term3 = z_xtp_curr * jnp.exp(z_xt_prev - 1)
     v = params["v"]
-    norm = lamb * (2 * v * (jnp.mean(inner) - 1) - v**2)
-    return jnp.mean(term1 - (1 - alpha) * term2 - alpha * term3) + norm
+    norm = jnp.sum(2 * v * (jnp.mean(jnp.exp(z_xt_curr - 1)**2, axis=0) - 1) - v**2)
+    return jnp.mean(term1 - (1 - alpha) * term2 - alpha * term3) + lamb * norm
 
 
 def train_step(state, loss_fn, batch, params_prev, alpha, lamb=1):
