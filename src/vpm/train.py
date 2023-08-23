@@ -16,8 +16,8 @@ from jax import random
 
 @jax.jit
 def loss_jacobi(params, state, params_prev, batch, alpha, lamb=1):
-    xt = batch[0, ...]
-    xtp = batch[1, ...]
+    xt = batch[0]
+    xtp = batch[1]
     q_xt_prev = state.apply_fn(params_prev, xt)
     q_xtp_prev = state.apply_fn(params_prev, xtp)
     q_xt_curr = state.apply_fn(params, xt)
@@ -31,8 +31,8 @@ def loss_jacobi(params, state, params_prev, batch, alpha, lamb=1):
 
 @jax.jit
 def loss_sigmoid(params, state, params_prev, batch, alpha, lamb=1):
-    xt = batch[0, ...]
-    xtp = batch[1, ...]
+    xt = batch[0]
+    xtp = batch[1]
     q_xt_prev = nn.sigmoid(state.apply_fn(params_prev, xt))
     q_xtp_prev = nn.sigmoid(state.apply_fn(params_prev, xtp))
     q_xt_curr = state.apply_fn(params, xt)
@@ -46,19 +46,19 @@ def loss_sigmoid(params, state, params_prev, batch, alpha, lamb=1):
 
 @jax.jit
 def loss_pi(params, state, params_prev, batch, alpha, lamb=1):
-    xt = batch[0, ...]
-    xtp = batch[1, ...]
+    xt = batch[0]
+    xtp = batch[1]
     z_xt_prev = state.apply_fn(params_prev, xt)
     z_xt_curr = state.apply_fn(params, xt)
     z_xtp_curr = state.apply_fn(params, xtp)
 
     # TODO: check loss terms
-    term1 = jnp.exp(z_xt_curr)
-    term2 = z_xt_curr * jnp.exp(z_xt_prev - 1)
-    term3 = z_xtp_curr * jnp.exp(z_xt_prev - 1)
+    term1 = jnp.mean(jnp.exp(z_xt_curr))
+    term2 = jnp.mean(z_xt_curr * jnp.exp(z_xt_prev - 1))
+    term3 = jnp.mean(z_xtp_curr * jnp.exp(z_xt_prev - 1))
     v = params["v"]
     norm = jnp.sum(2 * v * (jnp.mean(jnp.exp(z_xt_curr - 1)**2, axis=0) - 1) - v**2)
-    return jnp.mean(term1 - (1 - alpha) * term2 - alpha * term3) + lamb * norm
+    return term1 - (1 - alpha) * term2 - alpha * term3 + lamb * norm
 
 
 def train_step(state, loss_fn, batch, params_prev, alpha, lamb=1):

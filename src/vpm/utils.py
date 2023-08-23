@@ -72,6 +72,19 @@ def solve_vac(X):
     return evals[inds], coeffs[:, inds]
 
 
+def solve_dga(basis, rhs, guess):
+    """Solve DGA problem :math:`(C(0) - C(t))v = (r(t) - r(0) + \rho)`
+    where r is the guess and :math:`\rho` is the integral for the FK problem.
+    """
+    c0 = basis[0].T @ basis[0]
+    ct = basis[0].T @ basis[1]
+    b_dga = basis[0].T @ (rhs + guess[1] - guess[0])
+    A_dga = c0 - ct
+    coeff = np.linalg.solve(A_dga, b_dga)
+    ans = basis @ coeff
+    return coeffs, ans
+
+
 def projection_distance(u, v):
     """Computes the projection distance between subspaces
     spanned by u and v. u and v are assumed to be orthonormal
