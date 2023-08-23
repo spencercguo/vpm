@@ -1,5 +1,6 @@
 import copy
 from typing import Any, Callable, Sequence, Tuple
+from functools import partial
 
 import flax
 import flax.linen as nn
@@ -61,6 +62,7 @@ def loss_pi(params, state, params_prev, batch, alpha, lamb=1):
     return term1 - (1 - alpha) * term2 - alpha * term3 + lamb * norm
 
 
+@partial(jax.jit, static_argnames=("loss_fn"))
 def train_step(state, loss_fn, batch, params_prev, alpha, lamb=1):
     """Performs a single optimization step for a given loss function.
 
@@ -84,9 +86,6 @@ def train_step(state, loss_fn, batch, params_prev, alpha, lamb=1):
     new_state = state.apply_gradients(grads=grads)
 
     return new_state, loss
-
-
-train_step_jit = jax.jit(train_step, static_argnames=("loss_fn"))
 
 
 def initialize(rng, model, lr, **kwargs):
@@ -431,7 +430,7 @@ def subspace_initialize(rng, model, lr, input_dim, output_dim, **kwargs) -> Trai
     flat_params = traverse_util.flatten_dict(params, sep="/")
     unfrozen_params = unfreeze(params)
     unfrozen_params["A"] = jnp.eye(output_dim)
-    unfrozen_params["v"] = jnp.zeros(shape=(output_dim, 1))
+    unfrozen_params["v"] = jnp.zeros(shape=(output_dim,))
     params = freeze(unfrozen_params)
 
     tx = optax.adam(learning_rate=lr)
