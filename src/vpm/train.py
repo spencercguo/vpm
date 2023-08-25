@@ -151,7 +151,7 @@ def train_power_iteration(
         batch_idx = random.choice(key, size, shape=(batch_size,))
         batch = dataset[:, batch_idx, :]
         # perform a training step
-        state, loss = train_step_jit(state, loss_fn, batch, params_prev, alpha)
+        state, loss = train_step(state, loss_fn, batch, params_prev, alpha)
         # print loss
         epoch_loss.append(loss)
         if i % print_loss_every == 0:
